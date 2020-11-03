@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 import pandas as pd
+from playsound import playsound
 
 import CONSTANTS
 import TK_utils as tk_u
@@ -134,3 +135,7 @@ if __name__ == '__main__':
         load_start_timestamp = datetime.now()
         load_one_date(date)
     tk_u.manual_logging_timedelta(load_start_timestamp)
+    try:
+        playsound('./data/Duck_is_burning.wav')
+    except UnicodeDecodeError:
+        logger.error("Damn, Playsound isn't working again")

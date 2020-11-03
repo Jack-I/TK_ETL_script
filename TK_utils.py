@@ -108,10 +108,6 @@ def server_request(api_url_tail, params):
         raise RuntimeError("Server gives not ok respond")
     else:
         res_content = json.loads(res.content)  # res.content - "binary" data, not html-formatted
-        # print(f"Response from call {params['type_query']} contains fields: ")
-        # for key, val in res_content.items():
-        #     print(key, end='\t')
-        # print('')
         print(f"{params['type_query']}...")
         if res_content['status'] != "1":
             print('API respond.content["status"] is not "1", it is ', res_content['status'])
@@ -255,16 +251,6 @@ def decode_way(encoded: str) -> list:
         print_exc()
         array = []
     return array
-
-
-def calc_barycenter(list_of_dicts):
-    """DEPRECATED"""
-    x_sum = y_sum = 0
-    for point in list_of_dicts:
-        x_sum += point['X']
-        y_sum += point['Y']
-    result = {'X': round(x_sum / len(list_of_dicts), 6), 'Y': round(y_sum / len(list_of_dicts), 6)}
-    return result
 
 
 def is_in_polygon(X, Y, polygon):

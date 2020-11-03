@@ -23,8 +23,7 @@ def job():
 if __name__ == '__main__':
     print('Ah shit, here we go again...')
     # Schedule a job
-    schedule.every().day.at("09:30").do(job)
-    #schedule.every().day.at("16:01").do(job)
+    schedule.every().day.at("08:30").do(job)
 
     # Do the job
     while True:

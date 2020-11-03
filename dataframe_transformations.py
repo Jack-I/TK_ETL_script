@@ -33,7 +33,7 @@ def modify_and_save_pins(df, car_classes_df, cities_df, geo_df, date):
     df.drop(columns=['id', 'type', 'city', 'to_local_time_corr'], inplace=True)
     df.rename(columns={'name': 'city'}, inplace=True)
     # Incoming source mapping
-    df['come_from'] = df.come_from.astype(str).map(renaming_dicts.incoming_type)
+    df['come_from'] = df.come_from.map(renaming_dicts.incoming_type)
     # Separate 'date' column to date and time
     df['dat'] = pd.to_datetime(df.dat)
     new_dates, new_times = zip(*[(d.date(), d.time()) for d in df['dat']])
@@ -70,29 +70,20 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     """
     df['points'] = df['points'].apply(len)  # transitional points list to len of that list
     df['type_auto'] = df.type_auto.astype(int)
-    # df['is_taxo'] = df.is_taxo.replace('', np.NaN).astype(bool)  # bool casts missing values to False
     df['is_taxo'] = pd.array(df.is_taxo.replace('', np.NaN), dtype=pd.Int8Dtype())  # so I use Int8
-    # df['base_price'] = pd.array(df.base_price, dtype=pd.Int32Dtype())  # To keep INT with NaNs
-    # df['base_price2'] = pd.array(df.base_price2, dtype=pd.Int32Dtype())  # To keep INT with NaNs
     df['base_price'] = df['base_price'].fillna(0).astype(int)
     df['base_price2'] = df['base_price2'].fillna(0).astype(int)
     df['proc_a_in'] = df.proc_a_in.astype(int) / 100
+    # Extract car serving time from autos_time
+    df['autos_time'] = df.apply(lambda x:
+                                extract_unf_car_time(x.type_auto, x.autos_time),
+                                axis=1)  # axis ==1 => apply to each row
+
+    df['autos_time'] = pd.array(df.autos_time, dtype=pd.Int16Dtype())
+    # Merge with car classes
     df = df.merge(car_classes_df, left_on='type_auto', right_on='id', how='left')  # retrieve car classes names
     df.drop(columns=['type_auto', 'id'], inplace=True)  # cleaning after merge
     df.rename({'name': 'type_auto'}, axis='columns', inplace=True)  # cleaning after merge
-    # Extract min car serving time from autos_time
-    for idx, row in df.iterrows():
-        min_car_time = 100500
-        if row['autos_time'] == '':
-            df.loc[idx, 'autos_time'] = np.NaN
-            continue
-        for time in (dct['time'] for dct in row['autos_time']):
-            min_car_time = min(time, min_car_time)
-        if min_car_time == 100500:
-            min_car_time = np.NaN
-        df.loc[idx, 'autos_time'] = min_car_time
-    # df['autos_time'] = df.autos_time.astype(int)
-    df['autos_time'] = pd.array(df.autos_time, dtype=pd.Int16Dtype())
     # Merge with cities names df and drop non-taxi entries
     df = df.merge(cities_df, left_on='city', right_on='id', how='left', suffixes=('', '_source'))
     df = df[df.type_source.str.startswith('taxi', na=False)]
@@ -106,16 +97,13 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     # Drop duplicates!
     df.drop_duplicates(subset=['Дата', 'Время', 'phone'], ignore_index=True, inplace=True)
     # Incoming source mapping
-    df['type'] = df.type.astype(str).map(renaming_dicts.incoming_type)
+    df['type'] = df.type.map(renaming_dicts.incoming_type)
     # Get rid of possible bug entries
     df = df[df.x_in != 0.]
     # Map geo zones
     get_zone(df=df, geozone_df=geo_df, mode='in')
     get_zone(df=df, geozone_df=geo_df, mode='out')
     # Generate key field: MMDDhhmmss&id (or &phone[-7:] if id == 0)
-    # df['Номер_неоформленного'] = df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) + \
-    #                              df.Время.astype(str).str.replace(':', '', regex=True) + \
-    #                              df.id_client.astype(str)
     df['Номер_неоформленного'] = np.where(df.id_client == 0,
                                           df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) + \
                                           df.Время.astype(str).str.replace(':', '', regex=True) + \
@@ -148,9 +136,10 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     :param date: date to load in "YYYY-MM-DD" format
     :return: None, but saving file to local network server "\\bigshare\Выгрузки ТФ\Выгрузки My_TK\'year'\'month'"
     """
-    df.drop(columns=['id_user_out', 'c_zalog', 'text_breach', 'text_re_breach', 'note_control',
-                     'cancel_note_adm', 'cancel_note_okk', 'name_type_auto'
+    df.drop(columns=['id_user_out', 'name_type_auto',
+                    # * CONSTANTS.gruz_fields,
                      ], inplace=True)
+    df.drop(columns=[x for x in df.columns if x.startswith('g_')], inplace=True)  # remove all Gruzovichkoff columns
     df.drop_duplicates(subset='id', keep='last', inplace=True)  # id == Номер
     df['note'] = df['note'].str.replace(r'\r\n|\r|\n|\t', ' ')  # Delete damn escape-characters
     df['company_answer'] = df['company_answer'].str.replace(r'\r\n|\r|\n|\t', ' ')
@@ -160,14 +149,11 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['contact_client_name'] = df['contact_client_name'].str.strip()
     df['contact_client_name'] = df['contact_client_name'].replace(r'\r\n|\r|\n|\t', ' ')
     # Change date/time types
-    df['dat'] = pd.to_datetime(df['dat'])
+    lst = ['dat', 'dat_add', 'dat_out', 'driver_dat_a_in',
+               'ed_22', 'dat_close', 'dat_cancel']
+    # df.loc[:, lst] = df.loc[:, lst].apply(pd.to_datetime)
+    df[lst] = df[lst].apply(pd.to_datetime)
     df['dat'] = df.dat.dt.date
-    df['dat_add'] = pd.to_datetime(df['dat_add'])
-    df['dat_out'] = pd.to_datetime(df['dat_out'])
-    df['driver_dat_a_in'] = pd.to_datetime(df['driver_dat_a_in'])
-    df['ed_22'] = pd.to_datetime(df['ed_22'])
-    df['dat_close'] = pd.to_datetime(df['dat_close'])
-    df['dat_cancel'] = pd.to_datetime(df['dat_cancel'])
     # Transform the time format to the adequate one
     df['time_'] = df.time_.map(tk_u.time_transform)
     # Make 'Date and time of arrival' field
@@ -175,19 +161,16 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['Дата и время подачи'] = pd.to_datetime(df['Дата и время подачи'])
     df['Дата и время подачи'] = df['Дата и время подачи'].dt.strftime('%d.%m.%Y %H:%M')
     # Merge with cities names df, drop non-taxi entries, cast moscow time to local
-    df['city_'] = df.city_.replace('', 0).astype(int)  # empty strings has id equal 0
+    df['city_'] = df.city_.fillna(0).astype(int)  # missed values has id equal 0 (Saint-Petersburg)
     df = df.merge(cities_df, left_on='city_', right_on='id', how='left', suffixes=('', '_source'))
     df = df[df.type.str.startswith('taxi', na=False)]
-    # TODO: Correct all regional cities times with respect to timezones!!!
-    df['dat_add'] = df.dat_add + df.to_local_time_corr
-    df['dat_out'] = df.dat_out + df.to_local_time_corr
-    df['driver_dat_a_in'] = df.driver_dat_a_in + df.to_local_time_corr
-    df['ed_22'] = df.ed_22 + df.to_local_time_corr
-    df['dat_close'] = df.dat_close + df.to_local_time_corr
-    df['dat_cancel'] = df.dat_cancel + df.to_local_time_corr
+    df = df.apply(
+        lambda x: x + df.to_local_time_corr
+        if x.name in ['dat_add', 'dat_out', 'driver_dat_a_in',
+                      'ed_22', 'dat_close', 'dat_cancel'] else x)
     df.drop(columns=['id_source', 'type', 'city_', 'to_local_time_corr'], inplace=True)
     df.rename(columns={'name': 'city'}, inplace=True)
-    # Coords type cast
+    # Coords type cast and drop entries with empty coords
     df.rename(columns={'x_out_': 'x_out', 'y_out_': 'y_out'}, inplace=True)
     df.drop(df[df.x_in == ''].index, axis=0, inplace=True)
     df.drop(df[df.x_out == ''].index, axis=0, inplace=True)
@@ -198,35 +181,16 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['y_in'] = df.y_in.astype(float)
     df['y_out'] = df.y_out.astype(float)
     # Pickup zone's percent
-    df.hexo_proc_a_in.replace('', np.NaN, inplace=True)
     df['hexo_proc_a_in'] = df.hexo_proc_a_in.astype(float)
     # Other type transformations and empty field replacements
-    df['park_'] = df.park_.replace('', 0).astype(int) + 1
-    df['dr_minimum'] = df.dr_minimum.replace('', '0').astype(int)  # Driver's minimal payment
-    df['p_auto'] = df.p_auto.replace('', '0').astype(int)
-    df['pp_sum'] = df.pp_sum.replace('', '0').astype(int)
-    df['pp_min'] = df.pp_min.replace('', '0').astype(int)
-    df['pp_min_4'] = df.pp_min_4.replace('', '0').astype(int)
-    df['c_auto'] = df.c_auto.replace('', '0').astype(int)
-    df['c_auto_b'] = df.c_auto_b.replace('', '0').astype(int)
-    df['pp_sum'] = df.pp_sum.replace('', '0').astype(int)
-    df['driver_perc'] = df.driver_perc.replace(r'^\s*$', np.NaN, regex=True).astype(float)
-    df['c_auto_2'] = df.c_auto_2.replace('', '0').astype(int)
-    df['oper_pay'] = df.oper_pay.replace('', '0').astype(int)
-    df['ap_dist'] = df.ap_dist.replace('', '0').astype(int)
-    df['client_minimalka'] = df.client_minimalka.replace('', '0').astype(int)
-    df['slice_pr_by_hexo'] = df.slice_pr_by_hexo.replace('', '0').astype(int)
-    df['base_price'] = df.base_price.replace('', '0').astype(int)
-    df['base_price2'] = df.base_price2.replace('', '0').astype(int)
-    df['time_ed3'] = df.time_ed3.replace('', '0').astype(int)
-    df['time_ed0'] = df.time_ed0.replace('', '0').astype(int)
-    df['time2'] = df.time2.replace('', '0').astype(int)
-    df['dist1'] = df.dist1.replace('', '0').astype(int)
-    df['dist2'] = df.dist2.replace('', '0').astype(int)
-    df['p_driver_s'] = df.p_driver_s.str.replace(r'^\s*$', '0', regex=True)
-    df['p_driver_s'] = df['p_driver_s'].astype(int)
-    df['warn'] = df.warn.replace('', '0').astype(int)
-    df['dr_opt'] = df.dr_opt.replace('', '0').astype(int)
+    df['park_'] = df.park_.fillna(0).astype(int) + 1
+    lst = ['dr_minimum', 'p_auto', 'pp_sum', 'pp_min', 'pp_min_4',
+        'c_auto', 'c_auto_b', 'pp_sum', 'c_auto_2', 'oper_pay',
+        'ap_dist', 'client_minimalka', 'slice_pr_by_hexo',
+        'base_price', 'base_price2', 'time_ed3', 'time_ed0',
+        'time2', 'dist1', 'dist2', 'p_driver_s', 'warn',
+        'dr_opt', 'come_from']
+    df = df.apply(lambda x: x.fillna(0).astype(int) if x.name in lst else x)
     # replace all values in columns with the value of 10th/1st bit
     df['warn'] = df.warn.apply(tk_u.is_bit_setted, args=(10,))
     df['dr_opt'] = df.dr_opt.apply(tk_u.is_bit_setted, args=(1,))
@@ -272,32 +236,38 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df.drop(columns=['type_auto', 'id_classes'], inplace=True)  # cleaning after merge
     df.rename({'name': 'type_auto'}, axis='columns', inplace=True)  # cleaning after merge
     # Executed auto type merge
-    df['c_type_auto'].replace('', '-1', inplace=True)
+    df['c_type_auto'] = df.c_type_auto.fillna(-1)
     df['c_type_auto'] = df.c_type_auto.astype(int)
     df = df.merge(car_classes_df, left_on='c_type_auto', right_on='id', how='left', suffixes=('', '_classes'))
     df.drop(columns=['c_type_auto', 'id_classes'], inplace=True)
     df.rename(columns={'name': 'c_type_auto'}, inplace=True)
     # Order options merge
-    df['option_1'] = df.option_1.str.replace(r'^\s*$', '0', regex=True).apply(int, base=2)
-    df['option_2'] = df.option_2.str.replace(r'^\s*$', '0', regex=True).apply(int, base=2)
-    df['option_3'] = df.option_3.str.replace(r'^\s*$', '0', regex=True).apply(int, base=2)
-    df['opt_4'] = df['opt_4'].str.replace(r'^\s*$', '0', regex=True).astype(int)
+    df['option_1'] = df.option_1.fillna('0').apply(int, base=2)
+    df['option_2'] = df.option_2.fillna('0').apply(int, base=2)
+    if 'option_3' in df.columns:
+        df['option_3'] = df.option_3.fillna('0').apply(int, base=2)
+    else:
+        df['option_3'] = 0
+    df['opt_4'] = df['opt_4'].fillna('0').astype(int)
     extract_ride_options(df=df, opt_df=options_df)
     # Create 'ПРЦ предлагалось', 'ПРЦ использовано' and 'Расчет по базе 2?' columns
-    df['stat_opt'] = df.stat_opt.replace('', '0').astype(int)
+    df['stat_opt'] = df.stat_opt.fillna(0).astype(int)
     unfold_stat_opt(df=df)
     # Drivers from 'Обменник'
     df['family_driver'] = np.where(df['driver'] == '-1',
                                    'Водитель из обменника',
                                    df['family_driver'])
-    #df.driver.replace('-1', np.NaN, inplace=True)
     # Addresses transform
+    df = df.apply(
+        lambda x: x.fillna('')
+        if x.name in ['a_in', 'a_in_house',
+                      'a_out', 'a_out_house'] else x)
     df['Адрес подачи'] = df['a_in'] + ' ' + df['a_in_house']
     df['Адреса назначения'] = df['a_out'] + ' ' + df['a_out_house']
     # Status mapping
     df['status'] = df.status.map(renaming_dicts.ord_status)
     # Our / owner-driver mapping
-    df['our_driver'] = df.our_driver.map(renaming_dicts.our_or_owner_driver)  # .fillna(df['our_driver'])
+    df['our_driver'] = df.our_driver.map(renaming_dicts.our_or_owner_driver)
     # Payment type mapping
     df['type_money'] = df.type_money.map(renaming_dicts.payment_type)
     df['type_money_b'] = df.type_money_b.map(renaming_dicts.payment_type)
@@ -310,7 +280,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     get_zone(df=df, geozone_df=geo_df, mode='in')
     get_zone(df=df, geozone_df=geo_df, mode='out')
     # Final renaming, dropping and saving
-    df.rename(renaming_dicts.ord, axis='columns', inplace=True)
+    df.rename(renaming_dicts.orders, axis='columns', inplace=True)
     df.drop(columns=['a_in', 'a_in_house', 'a_out', 'a_out_house', 'stat_opt',
                      'option_1', 'option_2', 'option_3', 'opt_4', 'warn', 'dr_opt'], inplace=True)
     df.replace(r'^\s*$', np.NaN, regex=True, inplace=True)  # replace all empty strings with NaNs
@@ -337,7 +307,6 @@ def get_geozones(df, cities_df):
     df.rename(columns={'name': 'city', 'name_': 'geozone'}, inplace=True)
     df.drop_duplicates(subset=['geozone', 'city'], inplace=True)
     df.reset_index(drop=True, inplace=True)
-    # df['barycenter'] = df.compressed_boundary.apply(calc_barycenter)
     # Excel bug: in excel some city values appear to be empty, but dataframe is whole:
     df.to_csv(r"match_tables/geozones.csv", sep=';', index=False)
     return df
@@ -445,3 +414,20 @@ def extract_ride_options(df, opt_df):
             if tk_u.is_bit_setted(row['opt_4'], n_of_bit=bit):
                 df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 31),'name'][bit + 30] + ', '
     df['Опции_заказа'] = np.where(df.Опции_заказа == '', np.NaN, df.Опции_заказа.str.replace(', $', '', regex=True))
+
+
+def extract_unf_car_time(type_auto, autos_time):
+    """
+    _Vectorized_ function! Sets one serving time instead of lists with dicts with times by classes
+    :param type_auto: Series with selected auto types (df.type_auto)
+    :param autos_time: Series with selected auto types (df.autos_time)
+    :return: Series with one time per row, for assign back to df.autos_time
+    """
+    for dct in autos_time:
+        if type_auto == 0:
+            temp = 1  # Set "Standard" if type wasn't selected
+        else:
+            temp = type_auto
+        if dct['id_auto'] == temp:
+            return dct['time']
+    return np.NaN
