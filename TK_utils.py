@@ -14,6 +14,8 @@ import requests
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
+import CONSTANTS
+
 """
 TK_utils contains data extract functions (server_request and decode_decompress),
 data load function (load_to_GDrive), and various utilities (time_transform, set_date, set_interval)
@@ -92,7 +94,7 @@ def server_request(api_url_tail, params):
     """
     logger = logging.getLogger(__name__)
     # Get request to server
-    ip_list = ['192.168.221.30:81', '192.168.212.30:81', '192.168.218.30:81']
+    ip_list = CONSTANTS.ip_list.copy()
     res = False
     while ip_list:
         shuffle(ip_list)
@@ -108,6 +110,10 @@ def server_request(api_url_tail, params):
         raise RuntimeError("Server gives not ok respond")
     else:
         res_content = json.loads(res.content)  # res.content - "binary" data, not html-formatted
+        # print(f"Response from call {params['type_query']} contains fields: ")
+        # for key, val in res_content.items():
+        #     print(key, end='\t')
+        # print('')
         print(f"{params['type_query']}...")
         if res_content['status'] != "1":
             print('API respond.content["status"] is not "1", it is ', res_content['status'])
@@ -142,22 +148,21 @@ def set_date():
     :return: date in 'YYYY-MM-DD' formal
     """
     while True:
-        print('Pls input date in format "YYYY-MM-DD" (w/o quotes)\nor press Enter for yesterday: 2020-', end="")
-        load_date = input()  # just for 2020
-        pattern = r"(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
-        # print('Pls input date in format "YYYY-MM-DD" (w/o quotes)\nor press Enter for default value: ', end="")
-        # load_date = input()
-        # pattern = r"202\d-(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
+        # print('Pls input date in format "YYYY-MM-DD" (w/o quotes)\nor press Enter for yesterday: 2021-', end="")
+        # load_date = input()  # just for 2021
+        # pattern = r"(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
+        print('Pls input date in the "YYYY-MM-DD" format (w/o quotes)\nor just press Enter for yesterday: ', end="")
+        load_date = input()
+        pattern = r"202\d-(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
         match = re.match(pattern, load_date)
         if match is not None:
             break
-        if not load_date:
-            load_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")  # default value - yesterday
+        if not load_date:  # default value - yesterday
+            load_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             print(load_date)
             return load_date
         print("Date format's wrong, lol!")
-    # just for 2020
-    load_date = '2020-' + load_date
+    # load_date = '2021-' + load_date  # just for 2021
     return load_date
 
 

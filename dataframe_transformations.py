@@ -73,6 +73,7 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     df['is_taxo'] = pd.array(df.is_taxo.replace('', np.NaN), dtype=pd.Int8Dtype())  # so I use Int8
     df['base_price'] = df['base_price'].fillna(0).astype(int)
     df['base_price2'] = df['base_price2'].fillna(0).astype(int)
+    df['is_b2'] = df.is_b2.replace({1.: 'Да'})
     df['proc_a_in'] = df.proc_a_in.astype(int) / 100
     # Extract car serving time from autos_time
     df['autos_time'] = df.apply(lambda x:
@@ -137,7 +138,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     :return: None, but saving file to local network server "\\bigshare\Выгрузки ТФ\Выгрузки My_TK\'year'\'month'"
     """
     df.drop(columns=['id_user_out', 'name_type_auto',
-                    # * CONSTANTS.gruz_fields,
+                     # * CONSTANTS.gruz_fields,
                      ], inplace=True)
     df.drop(columns=[x for x in df.columns if x.startswith('g_')], inplace=True)  # remove all Gruzovichkoff columns
     df.drop_duplicates(subset='id', keep='last', inplace=True)  # id == Номер
@@ -150,7 +151,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['contact_client_name'] = df['contact_client_name'].replace(r'\r\n|\r|\n|\t', ' ')
     # Change date/time types
     lst = ['dat', 'dat_add', 'dat_out', 'driver_dat_a_in',
-               'ed_22', 'dat_close', 'dat_cancel']
+           'ed_22', 'dat_close', 'dat_cancel']
     # df.loc[:, lst] = df.loc[:, lst].apply(pd.to_datetime)
     df[lst] = df[lst].apply(pd.to_datetime)
     df['dat'] = df.dat.dt.date
@@ -185,11 +186,11 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     # Other type transformations and empty field replacements
     df['park_'] = df.park_.fillna(0).astype(int) + 1
     lst = ['dr_minimum', 'p_auto', 'pp_sum', 'pp_min', 'pp_min_4',
-        'c_auto', 'c_auto_b', 'pp_sum', 'c_auto_2', 'oper_pay',
-        'ap_dist', 'client_minimalka', 'slice_pr_by_hexo',
-        'base_price', 'base_price2', 'time_ed3', 'time_ed0',
-        'time2', 'dist1', 'dist2', 'p_driver_s', 'warn',
-        'dr_opt', 'come_from']
+           'c_auto', 'c_auto_b', 'pp_sum', 'c_auto_2', 'oper_pay',
+           'ap_dist', 'client_minimalka', 'slice_pr_by_hexo',
+           'base_price', 'base_price2', 'time_ed3', 'time_ed0',
+           'time2', 'dist1', 'dist2', 'p_driver_s', 'warn',
+           'dr_opt', 'come_from']
     df = df.apply(lambda x: x.fillna(0).astype(int) if x.name in lst else x)
     # replace all values in columns with the value of 10th/1st bit
     df['warn'] = df.warn.apply(tk_u.is_bit_setted, args=(10,))
@@ -201,21 +202,21 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     # 1.1 Add (order's and paid waiting's cost) to p_driver_s IF:
     # payment type is 'Наличный' OR 'Залог' OR ('Картой вод' AND driver has personal terminal) [10th bit of WARN is set]
     df['p_driver_s'] = np.where(
-        ((df.our_driver != '0') | ((df.our_driver == '0') & df.dr_opt) ) &
+        ((df.our_driver != '0') | ((df.our_driver == '0') & df.dr_opt)) &
         ((df.type_money == '0') |
-        (df.type_money == '2') |
-        (df.type_money == '12') |
-        ((df.type_money == '5') & df.warn)),
+         (df.type_money == '2') |
+         (df.type_money == '12') |
+         ((df.type_money == '5') & df.warn)),
         df.p_driver_s + df.c_auto + df.pp_sum,
         df.p_driver_s)
     # 1.2 Add (order's and paid services's cost) to p_driver_s IF:
     # payment type 2 is 'Наличный' OR 'Залог' OR ('Картой вод' AND driver has personal terminal) [10th bit of WARN is set]
     df['p_driver_s'] = np.where(
-        ((df.our_driver != '0') | ((df.our_driver == '0') & df.dr_opt) ) &
+        ((df.our_driver != '0') | ((df.our_driver == '0') & df.dr_opt)) &
         ((df.type_money_b == '0') |
-        (df.type_money_b == '2') |
-        (df.type_money_b == '12') |
-        ((df.type_money_b == '5') & df.warn)),
+         (df.type_money_b == '2') |
+         (df.type_money_b == '12') |
+         ((df.type_money_b == '5') & df.warn)),
         df.p_driver_s + df.c_auto_b,
         df.p_driver_s)
     # 2 Cashless payment
@@ -257,6 +258,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['family_driver'] = np.where(df['driver'] == '-1',
                                    'Водитель из обменника',
                                    df['family_driver'])
+    # df.driver.replace('-1', np.NaN, inplace=True)
     # Addresses transform
     df = df.apply(
         lambda x: x.fillna('')
@@ -307,6 +309,7 @@ def get_geozones(df, cities_df):
     df.rename(columns={'name': 'city', 'name_': 'geozone'}, inplace=True)
     df.drop_duplicates(subset=['geozone', 'city'], inplace=True)
     df.reset_index(drop=True, inplace=True)
+    # df['barycenter'] = df.compressed_boundary.apply(calc_barycenter)
     # Excel bug: in excel some city values appear to be empty, but dataframe is whole:
     df.to_csv(r"match_tables/geozones.csv", sep=';', index=False)
     return df
@@ -403,16 +406,16 @@ def extract_ride_options(df, opt_df):
     for idx, row in df.iterrows():
         for bit in range(10):
             if tk_u.is_bit_setted(row['option_1'], n_of_bit=bit):
-                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 1),'name'][bit] + ', '
+                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 1), 'name'][bit] + ', '
         for bit in range(10):
             if tk_u.is_bit_setted(row['option_2'], n_of_bit=bit):
-                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 11),'name'][bit + 10] + ', '
+                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 11), 'name'][bit + 10] + ', '
         for bit in range(10):
             if tk_u.is_bit_setted(row['option_3'], n_of_bit=bit):
-                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 21),'name'][bit + 20] + ', '
+                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 21), 'name'][bit + 20] + ', '
         for bit in range(7):
             if tk_u.is_bit_setted(row['opt_4'], n_of_bit=bit):
-                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 31),'name'][bit + 30] + ', '
+                df.loc[idx, 'Опции_заказа'] += opt_df.loc[opt_df['id_option'] == (bit + 31), 'name'][bit + 30] + ', '
     df['Опции_заказа'] = np.where(df.Опции_заказа == '', np.NaN, df.Опции_заказа.str.replace(', $', '', regex=True))
 
 
