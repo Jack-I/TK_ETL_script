@@ -11,14 +11,12 @@ from traceback import print_exc
 import matplotlib.path as mpltPath
 import pandas as pd
 import requests
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
 
-import CONSTANTS
+import secrets
 
 """
 TK_utils contains data extract functions (server_request and decode_decompress),
-data load function (load_to_GDrive), and various utilities (time_transform, set_date, set_interval)
+and various utilities (time_transform, set_date, set_interval)
 and MANY MOAR
 """
 
@@ -41,60 +39,16 @@ def time_transform(x):
         raise RuntimeError("Wrong time format received")
 
 
-def load_to_GDrive(csv_path):
-    """Loads the file to the My_TK folder onto my personal Google Drive
-    Args: path to loaded csv file
-    :return: None"""
-    """Link to share my 'My_TK' Google Drive folder:
-     https://drive.google.com/drive/folders/1DMJArpNF8k2qC3h8Cqc4qtTGUfL1z-y4?usp=sharing
-     """
-    logging.getLogger('googleapiclient.discovery').setLevel(logging.CRITICAL)
-
-    my_TK_folder_id = '1DMJArpNF8k2qC3h8Cqc4qtTGUfL1z-y4'
-    file_name = csv_path[5:]
-    gauth = GoogleAuth()  # https://stackoverflow.com/questions/24419188/automating-pydrive-verification-process
-    gauth.LoadCredentialsFile("mycreds.txt")
-    if gauth.credentials is None:
-        # Authenticate if they're not there
-        gauth.GetFlow()
-        gauth.flow.params.update({'access_type': 'offline'})
-        gauth.flow.params.update({'approval_prompt': 'force'})
-        gauth.LocalWebserverAuth()
-    elif gauth.access_token_expired:
-        # Refresh them if expired
-        gauth.Refresh()
-    else:
-        # Initialize the saved creds
-        gauth.Authorize()
-    # Save the current credentials to a file
-    gauth.SaveCredentialsFile("mycreds.txt")
-
-    drive = GoogleDrive(gauth)
-    # Update: deletes file if it's already exists
-    file_list = drive.ListFile({'q': f"'{my_TK_folder_id}' in parents and trashed=false"}).GetList()
-    for existing_file in file_list:
-        if existing_file['title'] == file_name:
-            existing_file.Delete()
-
-    file = drive.CreateFile({'parents': [{'id': my_TK_folder_id}]})
-    file.SetContentFile(csv_path)
-    file['title'] = file_name  # cuts 'data/'
-    file.Upload()
-    logger = logging.getLogger(__name__)
-    logger.info(file_name + " is loaded to Google Drive")
-    # TODO: maybe change file name for data pipeline?
-
-
 def server_request(api_url_tail, params):
     """
     Request server via REST API
-    :param api_url_tail: tail from CONSTANTS.py to form whole URL like 'http://' + ip + api_url_tail
+    :param api_url_tail: tail from secrets.py to form whole URL like 'http://' + ip + api_url_tail
     :param params: REST API params(type_query, login, pass, date, lang)
     :return: content of the request in JSON format (some fields are coded)
     """
     logger = logging.getLogger(__name__)
     # Get request to server
-    ip_list = CONSTANTS.ip_list.copy()
+    ip_list = secrets.ip_list.copy()
     res = False
     while ip_list:
         shuffle(ip_list)
@@ -124,7 +78,9 @@ def server_request(api_url_tail, params):
 
 def decode_decompress(data, backup_name=None, date=None):
     """
-    Decodes 'data' part of respond and saves it locally as JSON
+    Takes 'data' part of the server respond and transforms it into readable format.
+    The chain of transformations is: data (UTF8 encoded string) -> byte encoding -> base64 decoding ->
+    zlib decompress -> byte decoding -> JSON loading -> dictionary with data
     :param data: 'data' part of the server respond
     :param backup_name: just for filename to save
     :param date: and this is too just for filename
@@ -135,9 +91,6 @@ def decode_decompress(data, backup_name=None, date=None):
     decoded_data_bytes = base64.b64decode(encoded_data_bytes)  # bytes-like object base64 decoded
     final_data_bytes = zlib.decompress(decoded_data_bytes)  # bytes-like object zlib decompressed
     final_data_json = final_data_bytes.decode('utf-8')  # encoded string to decoded plain string with JSON data
-    if date is not None:
-        with open(f"backup/{backup_name}_{date}.JSON", 'wb') as f:
-            f.write(final_data_json.encode('utf8'))
     final_data = json.loads(final_data_json)  # parse JSON to python (list)
     return final_data
 
@@ -256,6 +209,16 @@ def decode_way(encoded: str) -> list:
         print_exc()
         array = []
     return array
+
+
+def calc_barycenter(list_of_dicts):
+    """DEPRECATED"""
+    x_sum = y_sum = 0
+    for point in list_of_dicts:
+        x_sum += point['X']
+        y_sum += point['Y']
+    result = {'X': round(x_sum / len(list_of_dicts), 6), 'Y': round(y_sum / len(list_of_dicts), 6)}
+    return result
 
 
 def is_in_polygon(X, Y, polygon):

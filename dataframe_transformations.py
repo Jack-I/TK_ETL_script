@@ -8,9 +8,9 @@ import logging
 import numpy as np
 import pandas as pd
 
-import CONSTANTS
 import TK_utils as tk_u
 import renaming_dicts
+import secrets
 
 
 def modify_and_save_pins(df, car_classes_df, cities_df, geo_df, date):
@@ -21,17 +21,19 @@ def modify_and_save_pins(df, car_classes_df, cities_df, geo_df, date):
     :param cities_df: Pandas DataFrame with cities id's and names
     :param geo_df: Pandas DataFrame with geo zones names, their boundary points and city names
     :param date: date to load in "YYYY-MM-DD" format
-    :return: None, but saving file to local network server "\\bigshare\Выгрузки ТФ\Выгрузки My_TK\'year'\'month'"
+    :return: None, but saving file to local network server "//bigshare/Выгрузки ТФ/Выгрузки My_TK/'year'/'month'"
     """
     # Merge car classes
     df = df.merge(car_classes_df, left_on='type_auto', right_on='id', how='left')  # retrieve car classes names
     df.drop(columns=['type_auto', 'id'], inplace=True)  # cleaning after merge
     df.rename({'name': 'type_auto'}, axis='columns', inplace=True)  # cleaning after merge
-    # Merge cities
+    # Merge with cities names df and drop non-taxi entries
     df = df.merge(cities_df, left_on='city', right_on='id', how='left')
     df = df[df.type.str.startswith('taxi', na=False)]
     df.drop(columns=['id', 'type', 'city', 'to_local_time_corr'], inplace=True)
     df.rename(columns={'name': 'city'}, inplace=True)
+    # Add 'Регион' field
+    df['Регион'] = df.city.map(secrets.region_dict)
     # Incoming source mapping
     df['come_from'] = df.come_from.map(renaming_dicts.incoming_type)
     # Separate 'date' column to date and time
@@ -55,7 +57,6 @@ def modify_and_save_pins(df, car_classes_df, cities_df, geo_df, date):
     df.to_csv(
         f"{saving_path}/{date}_пины.csv",
         sep=';', index=False)
-    # load_to_GDrive(f"data/{date}_пины.csv")
 
 
 def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
@@ -66,15 +67,20 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     :param cities_df: Pandas DataFrame with cities id's and names
     :param geo_df: Pandas DataFrame with geo zones names, their boundary points and city names
     :param date: date to load in "YYYY-MM-DD" format
-    :return: None, but saving file to local network server "\\bigshare\Выгрузки ТФ\Выгрузки My_TK\'year'\'month'"
+    :return: None, but saving file to local network server "//bigshare/Выгрузки ТФ/Выгрузки My_TK/'year'/'month'"
     """
     df['points'] = df['points'].apply(len)  # transitional points list to len of that list
     df['type_auto'] = df.type_auto.astype(int)
     df['is_taxo'] = pd.array(df.is_taxo.replace('', np.NaN), dtype=pd.Int8Dtype())  # so I use Int8
     df['base_price'] = df['base_price'].fillna(0).astype(int)
     df['base_price2'] = df['base_price2'].fillna(0).astype(int)
-    df['is_b2'] = df.is_b2.replace({1.: 'Да'})
-    df['proc_a_in'] = df.proc_a_in.astype(int) / 100
+    # FIXME duct tape for compatibility
+    if 'is_b2' in df.columns:
+        df['is_b2'] = df.is_b2.replace({1.: 'Да'})
+    df['proc_a_in'] = df.proc_a_in / 100
+    # FIXME duct tape for compatibility
+    if 'k_jam' in df.columns:
+        df['k_jam'] = df.k_jam.fillna(1.)
     # Extract car serving time from autos_time
     df['autos_time'] = df.apply(lambda x:
                                 extract_unf_car_time(x.type_auto, x.autos_time),
@@ -90,6 +96,8 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     df = df[df.type_source.str.startswith('taxi', na=False)]
     df.drop(columns=['id', 'type_source', 'city', 'to_local_time_corr'], inplace=True)
     df.rename(columns={'name': 'city'}, inplace=True)
+    # Add 'Регион' field
+    df['Регион'] = df.city.map(secrets.region_dict)
     # Separate 'date' column to date and time
     df['date'] = pd.to_datetime(df.date)
     new_dates, new_times = zip(*[(d.date(), d.time()) for d in df['date']])
@@ -105,13 +113,14 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     get_zone(df=df, geozone_df=geo_df, mode='in')
     get_zone(df=df, geozone_df=geo_df, mode='out')
     # Generate key field: MMDDhhmmss&id (or &phone[-7:] if id == 0)
-    df['Номер_неоформленного'] = np.where(df.id_client == 0,
-                                          df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) + \
-                                          df.Время.astype(str).str.replace(':', '', regex=True) + \
-                                          df.phone.astype(str).apply(lambda x: x[-7:]),
-                                          df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) + \
-                                          df.Время.astype(str).str.replace(':', '', regex=True) + \
-                                          df.id_client.astype(str))
+    df['Номер_неоформленного'] = np.where(
+        df.id_client == 0,
+        df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) +
+        df.Время.astype(str).str.replace(':', '', regex=True) +
+        df.phone.astype(str).apply(lambda x: x[-7:]),
+        df.Дата.astype(str).str.replace('-', '', regex=True).apply(lambda x: x[-4:]) +
+        df.Время.astype(str).str.replace(':', '', regex=True) +
+        df.id_client.astype(str))
     # Final renaming, dropping and saving
     df.rename(renaming_dicts.unf, axis='columns', inplace=True)
     df.drop(columns=['option_1', 'option_2', 'option_3',
@@ -123,7 +132,6 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     df.to_csv(
         f"{saving_path}/{date}_неоф.csv",
         sep=';', index=False)
-    # load_to_GDrive(f"data/{date}_неоф.csv")
 
 
 def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, date):
@@ -135,7 +143,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     :param options_df: Pandas DataFrame with options id's and names
     :param geo_df: Pandas DataFrame with geo zones names, their boundary points and city names
     :param date: date to load in "YYYY-MM-DD" format
-    :return: None, but saving file to local network server "\\bigshare\Выгрузки ТФ\Выгрузки My_TK\'year'\'month'"
+    :return: None, but saving file to local network server "//bigshare/Выгрузки ТФ/Выгрузки My_TK/'year'/'month'"
     """
     df.drop(columns=['id_user_out', 'name_type_auto',
                      # * CONSTANTS.gruz_fields,
@@ -152,7 +160,6 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     # Change date/time types
     lst = ['dat', 'dat_add', 'dat_out', 'driver_dat_a_in',
            'ed_22', 'dat_close', 'dat_cancel']
-    # df.loc[:, lst] = df.loc[:, lst].apply(pd.to_datetime)
     df[lst] = df[lst].apply(pd.to_datetime)
     df['dat'] = df.dat.dt.date
     # Transform the time format to the adequate one
@@ -171,6 +178,8 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
                       'ed_22', 'dat_close', 'dat_cancel'] else x)
     df.drop(columns=['id_source', 'type', 'city_', 'to_local_time_corr'], inplace=True)
     df.rename(columns={'name': 'city'}, inplace=True)
+    # Add 'Регион' field
+    df['Регион'] = df.city.map(secrets.region_dict)
     # Coords type cast and drop entries with empty coords
     df.rename(columns={'x_out_': 'x_out', 'y_out_': 'y_out'}, inplace=True)
     df.drop(df[df.x_in == ''].index, axis=0, inplace=True)
@@ -181,21 +190,22 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['x_out'] = df.x_out.astype(float)
     df['y_in'] = df.y_in.astype(float)
     df['y_out'] = df.y_out.astype(float)
-    # Pickup zone's percent
-    df['hexo_proc_a_in'] = df.hexo_proc_a_in.astype(float)
+    # Pickup zone's percents (by base1 and base2)
+    df['hexo_proc_a_in'] = df.hexo_proc_a_in.fillna(1.).astype(float)
+    df['k_jam'] = df.k_jam.astype(float).fillna(100) / 100
     # Other type transformations and empty field replacements
     df['park_'] = df.park_.fillna(0).astype(int) + 1
     lst = ['dr_minimum', 'p_auto', 'pp_sum', 'pp_min', 'pp_min_4',
-           'c_auto', 'c_auto_b', 'pp_sum', 'c_auto_2', 'oper_pay',
+           'c_auto', 'c_auto_b', 'pp_sum', 'oper_pay',
            'ap_dist', 'client_minimalka', 'slice_pr_by_hexo',
            'base_price', 'base_price2', 'time_ed3', 'time_ed0',
            'time2', 'dist1', 'dist2', 'p_driver_s', 'warn',
            'dr_opt', 'come_from']
     df = df.apply(lambda x: x.fillna(0).astype(int) if x.name in lst else x)
+    df['c_auto_2'] = df.c_auto_2.fillna(-1).astype(int)
     # replace all values in columns with the value of 10th/1st bit
     df['warn'] = df.warn.apply(tk_u.is_bit_setted, args=(10,))
     df['dr_opt'] = df.dr_opt.apply(tk_u.is_bit_setted, args=(1,))
-
     # Driver's part
     # Tips (5%, 10% and 15%) included. We can't count them separately without API improvement
     # 1. Private drivers and our drivers with car is in 'раскат' [1st bit of DR_OPT is set]
@@ -210,7 +220,8 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
         df.p_driver_s + df.c_auto + df.pp_sum,
         df.p_driver_s)
     # 1.2 Add (order's and paid services's cost) to p_driver_s IF:
-    # payment type 2 is 'Наличный' OR 'Залог' OR ('Картой вод' AND driver has personal terminal) [10th bit of WARN is set]
+    # payment type 2 is 'Наличный' OR 'Залог'
+    # OR ('Картой вод' AND driver has personal terminal) [10th bit of WARN is set]
     df['p_driver_s'] = np.where(
         ((df.our_driver != '0') | ((df.our_driver == '0') & df.dr_opt)) &
         ((df.type_money_b == '0') |
@@ -230,7 +241,13 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
         df.p_driver_s)
     # make part of the driver = 0 for cancelled orders
     df['p_driver_s'] = np.where(df.status == '3', 0, df.p_driver_s)
-
+    # partner's part
+    df['franch_perc'] = df.franch_perc.astype(float)
+    df['Часть_партнера'] = df.c_auto + df.c_auto_b - df.oper_pay
+    df.loc[df.c_auto_2 != -1, 'Часть_партнера'] = df.c_auto_2
+    df.loc[df.dr_minimum > df['Часть_партнера'], 'Часть_партнера'] = df.dr_minimum
+    df['Часть_партнера'] = df['Часть_партнера'] + df.pp_sum
+    df['Часть_партнера'] = round((df['Часть_партнера'] * df.franch_perc) / 100)
     # Required auto type merge
     df['type_auto'] = df.type_auto.astype(int)
     df = df.merge(car_classes_df, left_on='type_auto', right_on='id', how='left', suffixes=('', '_classes'))
@@ -283,15 +300,14 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     get_zone(df=df, geozone_df=geo_df, mode='out')
     # Final renaming, dropping and saving
     df.rename(renaming_dicts.orders, axis='columns', inplace=True)
-    df.drop(columns=['a_in', 'a_in_house', 'a_out', 'a_out_house', 'stat_opt',
-                     'option_1', 'option_2', 'option_3', 'opt_4', 'warn', 'dr_opt'], inplace=True)
+    df.drop(columns=['a_in', 'a_in_house', 'a_out', 'a_out_house', 'stat_opt', 't_work',
+                     'option_1', 'option_2', 'option_3', 'opt_4', 'warn', 'dr_opt', 'franch_perc'], inplace=True)
     df.replace(r'^\s*$', np.NaN, regex=True, inplace=True)  # replace all empty strings with NaNs
     # df.to_csv(f"data/{date}_заказы.csv", sep=';', index=False)
     saving_path = tk_u.set_bigshare_dir(date)
     df.to_csv(
         f"{saving_path}/{date}_заказы.csv",
         sep=';', index=False)
-    # load_to_GDrive(f"data/{date}_заказы.csv")
 
 
 def get_geozones(df, cities_df):
@@ -311,7 +327,7 @@ def get_geozones(df, cities_df):
     df.reset_index(drop=True, inplace=True)
     # df['barycenter'] = df.compressed_boundary.apply(calc_barycenter)
     # Excel bug: in excel some city values appear to be empty, but dataframe is whole:
-    df.to_csv(r"match_tables/geozones.csv", sep=';', index=False)
+    # df.to_csv(r"match_tables/geozones.csv", sep=';', index=False)
     return df
 
 
@@ -328,9 +344,9 @@ def get_zone(df, geozone_df, mode='in'):
     for idx, row in df.iterrows():  # iterate through dataframe
         # TODO: bug. Marks out zone by the city of input zone
         if row.city not in geo_cities_array:  # if there are no such city in geozones table
-            if row.city in CONSTANTS.spb_list:  # if city one of suburbs in big city then city slice = that city
+            if row.city in secrets.spb_list:  # if city one of suburbs in big city then city slice = that city
                 city_slice = geozone_df[geozone_df['city'] == 'Санкт-Петербург']
-            elif row.city in CONSTANTS.msk_list:
+            elif row.city in secrets.msk_list:
                 city_slice = geozone_df[geozone_df['city'] == 'Москва']
             elif mode == 'in':
                 df.loc[idx, 'Название зоны подачи'] = row.loc['city'] + ' (неразмеч. город)'
@@ -380,18 +396,12 @@ def unfold_stat_opt(df):
     :param df: Pandas DataFrame with orders
     :return: None
     """
-
-    for idx, row in df.iterrows():  # iterate through dataframe
-        if tk_u.is_bit_setted(row.stat_opt, n_of_bit=0):
-            df.loc[idx, 'ПРЦ предлагалось'] = 'Да'
-        else:
-            df.loc[idx, 'ПРЦ предлагалось'] = 'Нет'
-        if tk_u.is_bit_setted(row.stat_opt, n_of_bit=1):
-            df.loc[idx, 'ПРЦ использовано'] = 'Да'
-        else:
-            df.loc[idx, 'ПРЦ использовано'] = 'Нет'
-        if tk_u.is_bit_setted(row.stat_opt, n_of_bit=2):
-            df.loc[idx, 'Расчет по базе 2?'] = 'Да'
+    df['ПРЦ предлагалось'] = df.apply(lambda row: 'Да' if tk_u.is_bit_setted(row.stat_opt, n_of_bit=0) else np.NaN,
+                                      axis=1)
+    df['ПРЦ использовано'] = df.apply(lambda row: 'Да' if tk_u.is_bit_setted(row.stat_opt, n_of_bit=1) else np.NaN,
+                                      axis=1)
+    df['Расчет по базе 2?'] = df.apply(lambda row: 'Да' if tk_u.is_bit_setted(row.stat_opt, n_of_bit=2) else np.NaN,
+                                       axis=1)
 
 
 def extract_ride_options(df, opt_df):

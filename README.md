@@ -1,5 +1,5 @@
 "Taxocontrol extract-transform-load script"
-This project loads data via API, transforms it to proper state and stores it into folders and Google Drive.
+This project loads data via API, transforms it to proper state and stores it into folders and (Google Drive - now disabled).
 
 It works in manual and scheduled modes.
 For manual load some date - run the manual_load.py and input that date (or a date interval).
@@ -20,3 +20,5 @@ manual_load.py - was mentioned above.
 renaming_dicts.py (not included in repo by the reason of privacy) - contains Python dictionaries for renaming columns and categorical variables.
 
 scheduled_load.py - was mentioned above.
+
+bot_functions - couple of functions for telegram bot
