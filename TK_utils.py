@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import zlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import shuffle
 from traceback import print_exc
 
@@ -104,14 +104,15 @@ def set_date():
         # print('Pls input date in format "YYYY-MM-DD" (w/o quotes)\nor press Enter for yesterday: 2021-', end="")
         # load_date = input()  # just for 2021
         # pattern = r"(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
-        print('Pls input date in the "YYYY-MM-DD" format (w/o quotes)\nor just press Enter for yesterday: ', end="")
+        print('Pls input a date in the "YYYY-MM-DD" format (w/o quotes)\nor just press Enter for yesterday: ', end="")
         load_date = input()
         pattern = r"202\d-(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])"
         match = re.match(pattern, load_date)
         if match is not None:
             break
-        if not load_date:  # default value - yesterday
-            load_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        if not load_date:  # default value - yesterday, .now() in SPb time (UTC +3)
+            load_date = (datetime.now(timezone(timedelta(hours=+3)))
+                         - timedelta(days=1)).strftime("%Y-%m-%d")
             print(load_date)
             return load_date
         print("Date format's wrong, lol!")
@@ -136,10 +137,10 @@ def set_interval():
     return date_list
 
 
-def set_bigshare_dir(date):
+def set_bigshare_dir(date: str) -> str:
     """
     Check if proper folder exists. If not - creates it.
-    :param: date to save
+    :param date: date to save in 'YYYY-MM-DD' format
     :return: path for saving
     """
     logger = logging.getLogger(__name__)

@@ -8,6 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 
+import SMB_functions as smb_f
 import TK_utils as tk_u
 import renaming_dicts
 import secrets
@@ -52,12 +53,8 @@ def modify_and_save_pins(df, car_classes_df, cities_df, geo_df, date):
     df.rename(renaming_dicts.pin, axis='columns', inplace=True)
     df['Статус'] = 'Пин'
     df = df.replace(r'^\s*$', np.NaN, regex=True)  # replace all empty strings with NaNs
-    # df.to_csv(f"data/{date}_пины.csv", sep=';', index=False)
-    saving_path = tk_u.set_bigshare_dir(date)
-    df.to_csv(
-        f"{saving_path}/{date}_пины.csv",
-        sep=';', index=False)
-
+    saving_path = smb_f.set_bigshare_dir_smb(date)
+    smb_f.store_dataframe(df, saving_path, date, '_пины')
 
 def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     """
@@ -74,13 +71,9 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
     df['is_taxo'] = pd.array(df.is_taxo.replace('', np.NaN), dtype=pd.Int8Dtype())  # so I use Int8
     df['base_price'] = df['base_price'].fillna(0).astype(int)
     df['base_price2'] = df['base_price2'].fillna(0).astype(int)
-    # FIXME duct tape for compatibility
-    if 'is_b2' in df.columns:
-        df['is_b2'] = df.is_b2.replace({1.: 'Да'})
+    df['is_b2'] = df.is_b2.replace({1.: 'Да'})
     df['proc_a_in'] = df.proc_a_in / 100
-    # FIXME duct tape for compatibility
-    if 'k_jam' in df.columns:
-        df['k_jam'] = df.k_jam.fillna(1.)
+    df['k_jam'] = df.k_jam.fillna(1.)
     # Extract car serving time from autos_time
     df['autos_time'] = df.apply(lambda x:
                                 extract_unf_car_time(x.type_auto, x.autos_time),
@@ -127,11 +120,8 @@ def modify_and_save_unformed(df, car_classes_df, cities_df, geo_df, date):
                      'c_auto_all', 'proc_a_in_all', 'id_user'], inplace=True)
     df['Статус'] = 'Неоформленный'
     df = df.replace(r'^\s*$', np.NaN, regex=True)  # replace all empty strings with NaNs
-    # df.to_csv(f"data/{date}_неоф.csv", sep=';', index=False)
-    saving_path = tk_u.set_bigshare_dir(date)
-    df.to_csv(
-        f"{saving_path}/{date}_неоф.csv",
-        sep=';', index=False)
+    saving_path = smb_f.set_bigshare_dir_smb(date)
+    smb_f.store_dataframe(df, saving_path, date, '_неоф')
 
 
 def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, date):
@@ -150,8 +140,8 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
                      ], inplace=True)
     df.drop(columns=[x for x in df.columns if x.startswith('g_')], inplace=True)  # remove all Gruzovichkoff columns
     df.drop_duplicates(subset='id', keep='last', inplace=True)  # id == Номер
-    df['note'] = df['note'].str.replace(r'\r\n|\r|\n|\t', ' ')  # Delete damn escape-characters
-    df['company_answer'] = df['company_answer'].str.replace(r'\r\n|\r|\n|\t', ' ')
+    df['note'] = df['note'].str.replace(r'\r\n|\r|\n|\t', ' ', regex=True)  # Delete damn escape-characters
+    df['company_answer'] = df['company_answer'].str.replace(r'\r\n|\r|\n|\t', ' ', regex=True)
     # Trim names
     df['client_name'] = df['client_name'].str.strip()
     df['client_name'] = df['client_name'].replace(r'\r\n|\r|\n|\t', ' ')
@@ -200,9 +190,19 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
            'ap_dist', 'client_minimalka', 'slice_pr_by_hexo',
            'base_price', 'base_price2', 'time_ed3', 'time_ed0',
            'time2', 'dist1', 'dist2', 'p_driver_s', 'warn',
-           'dr_opt', 'come_from']
+           'dr_opt', 'come_from', 'brend', 'warn2']
     df = df.apply(lambda x: x.fillna(0).astype(int) if x.name in lst else x)
     df['c_auto_2'] = df.c_auto_2.fillna(-1).astype(int)
+    # Create 'Роздан по' column
+    df['Роздан_по'] = np.where(df.warn.apply(tk_u.is_bit_setted, args=(9,)),
+                               'Бронирование',
+                               np.where(df.warn.apply(tk_u.is_bit_setted, args=(13,)),
+                                        'Заказ в руку',
+                                        'Автораздача'))
+    # Create 'Срочный' column
+    df['Срочный'] = np.where(df.warn2.apply(tk_u.is_bit_setted, args=(8,)),
+                             'Да',
+                             np.NaN)
     # replace all values in columns with the value of 10th/1st bit
     df['warn'] = df.warn.apply(tk_u.is_bit_setted, args=(10,))
     df['dr_opt'] = df.dr_opt.apply(tk_u.is_bit_setted, args=(1,))
@@ -242,7 +242,7 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     # make part of the driver = 0 for cancelled orders
     df['p_driver_s'] = np.where(df.status == '3', 0, df.p_driver_s)
     # partner's part
-    df['franch_perc'] = df.franch_perc.astype(float)
+    df['franch_perc'] = df.franch_perc.astype(float).fillna(0)
     df['Часть_партнера'] = df.c_auto + df.c_auto_b - df.oper_pay
     df.loc[df.c_auto_2 != -1, 'Часть_партнера'] = df.c_auto_2
     df.loc[df.dr_minimum > df['Часть_партнера'], 'Часть_партнера'] = df.dr_minimum
@@ -292,6 +292,8 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     df['type_money_b'] = df.type_money_b.map(renaming_dicts.payment_type)
     # Incoming source mapping
     df['come_from'] = df.come_from.map(renaming_dicts.incoming_type)
+    # Brand mapping
+    df['brend'] = df.brend.map(renaming_dicts.brand)
     # Get rid of possible bug entries
     df = df[df.x_in != 0.]
     df = df[df.x_out != 0.]
@@ -301,13 +303,11 @@ def modify_and_save_orders(df, car_classes_df, cities_df, options_df, geo_df, da
     # Final renaming, dropping and saving
     df.rename(renaming_dicts.orders, axis='columns', inplace=True)
     df.drop(columns=['a_in', 'a_in_house', 'a_out', 'a_out_house', 'stat_opt', 't_work',
-                     'option_1', 'option_2', 'option_3', 'opt_4', 'warn', 'dr_opt', 'franch_perc'], inplace=True)
+                     'option_1', 'option_2', 'option_3', 'opt_4', 'warn', 'dr_opt', 'franch_perc',
+                     'warn2'], inplace=True)
     df.replace(r'^\s*$', np.NaN, regex=True, inplace=True)  # replace all empty strings with NaNs
-    # df.to_csv(f"data/{date}_заказы.csv", sep=';', index=False)
-    saving_path = tk_u.set_bigshare_dir(date)
-    df.to_csv(
-        f"{saving_path}/{date}_заказы.csv",
-        sep=';', index=False)
+    saving_path = smb_f.set_bigshare_dir_smb(date)
+    smb_f.store_dataframe(df, saving_path, date, '_заказы')
 
 
 def get_geozones(df, cities_df):
@@ -325,9 +325,6 @@ def get_geozones(df, cities_df):
     df.rename(columns={'name': 'city', 'name_': 'geozone'}, inplace=True)
     df.drop_duplicates(subset=['geozone', 'city'], inplace=True)
     df.reset_index(drop=True, inplace=True)
-    # df['barycenter'] = df.compressed_boundary.apply(calc_barycenter)
-    # Excel bug: in excel some city values appear to be empty, but dataframe is whole:
-    # df.to_csv(r"match_tables/geozones.csv", sep=';', index=False)
     return df
 
 
@@ -342,7 +339,7 @@ def get_zone(df, geozone_df, mode='in'):
     logger = logging.getLogger(__name__)
     geo_cities_array = geozone_df.city.unique()
     for idx, row in df.iterrows():  # iterate through dataframe
-        # TODO: bug. Marks out zone by the city of input zone
+        # Possibly marks out zone by the city of input zone
         if row.city not in geo_cities_array:  # if there are no such city in geozones table
             if row.city in secrets.spb_list:  # if city one of suburbs in big city then city slice = that city
                 city_slice = geozone_df[geozone_df['city'] == 'Санкт-Петербург']
@@ -387,7 +384,6 @@ def get_zone(df, geozone_df, mode='in'):
                 df.loc[idx, 'Название зоны подачи'] = row.loc['city'] + ' (неразмеч. зона)'
             if mode == 'out':
                 df.loc[idx, 'Название зоны назначения'] = row.loc['city'] + ' (неразмеч. зона)'
-    # logger.info(f"df with size {df.size} mapped with zones in '{mode}' mode")
 
 
 def unfold_stat_opt(df):

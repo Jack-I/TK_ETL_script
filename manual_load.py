@@ -2,8 +2,8 @@ import logging
 from datetime import datetime
 
 import pandas as pd
-from playsound import playsound
 
+import SMB_functions as smb_f
 import TK_utils as tk_u
 import dataframe_transformations as df_t
 import renaming_dicts
@@ -46,18 +46,15 @@ def load_one_date(date):
     cities_df['to_local_time_corr'] = cities_df.name.map(renaming_dicts.time_zones)  # just numeric field
     cities_df['to_local_time_corr'] = pd.to_timedelta(cities_df.to_local_time_corr, unit='hour')
     try:
-        cities_df.to_csv(r"\\bigshare\Выгрузки ТФ\Общая база qvd\cities_ids_and_types.csv",
-                         sep=';',
-                         index=False)
+        smb_f.store_dataframe(cities_df, 'Общая база qvd/', date='', name='cities_ids_and_types')
     except PermissionError:
         logger.warning(f'Cities ids file is locked by another user. Rewriting failed.')
 
     # Options for orders
     options_df = pd.DataFrame(unformed_content['options'])
-    options_df = options_df[options_df.id_option < 94]
+    options_df = options_df[options_df.id_option < 94]  # Tf options
     options_df = options_df.append({'id_option': 10, 'name': 'Скид.карта'}, ignore_index=True)
     options_df.sort_values(by='id_option', ignore_index=True, inplace=True)
-    # options_df.to_csv(r"match_tables/options.csv", sep=';', index=False)
 
     # Geozones
     geo_params = {
@@ -134,7 +131,4 @@ if __name__ == '__main__':
         load_start_timestamp = datetime.now()
         load_one_date(date)
     tk_u.manual_logging_timedelta(load_start_timestamp)
-    try:
-        playsound('./data/Duck_is_burning.wav')
-    except UnicodeDecodeError:
-        logger.error("Damn, Playsound isn't working again")
+    print('Unloading finished!')
